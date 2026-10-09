@@ -18,4 +18,30 @@ function normalize(){const phone=parse($('phone').value);if(phone){const inferre
 $('phone').addEventListener('input',()=>validate());$('phone').addEventListener('paste',()=>setTimeout(normalize,0));$('phone').addEventListener('blur',()=>{touched=true;normalize()});$('chat-form').addEventListener('submit',e=>{e.preventDefault();touched=true;normalize();if(validate(true))window.open('https://wa.me/'+current.number.slice(1),'_blank','noopener,noreferrer')});
 function renderCountries(){const q=$('search').value.trim().toLowerCase().replace(/^\+/,'');const matches=countryData.filter(c=>c.name.toLowerCase().includes(q)||c.dial.startsWith(q)||c.code.toLowerCase()===q);$('country-list').replaceChildren();for(const c of matches){const button=document.createElement('button');button.type='button';button.className='option';button.setAttribute('aria-pressed',String(c.code===country));const f=document.createElement('span');f.className='flag';f.textContent=flag(c.code);const name=document.createElement('span');name.textContent=c.name;const dial=document.createElement('span');dial.className='dial';dial.textContent='+'+c.dial;button.append(f,name,dial);button.addEventListener('click',()=>{selectCountry(c.code);$('countries').close();validate(touched);$('phone').focus()});$('country-list').append(button)}if(!matches.length){const empty=document.createElement('p');empty.className='empty';empty.textContent='No countries found.';$('country-list').append(empty)}}
 $('country-button').onclick=()=>{$('search').value='';renderCountries();$('countries').showModal();$('search').focus()};$('close').onclick=()=>$('countries').close();$('countries').addEventListener('click',e=>{if(e.target===$('countries')){const r=$('countries').getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)$('countries').close()}});$('search').addEventListener('input',renderCountries);selectCountry(country);
+
+// URL numbers without an international prefix use Pakistan consistently,
+// regardless of the visitor's timezone or browser language.
+function prefillFromPath(pathname){
+  let raw;
+  try{raw=decodeURIComponent(pathname.replace(/^\/+|\/+$/g,''));}catch{return;}
+  if(!raw||raw==='index.html')return;
+  raw=raw.trim().replace(/[\u0660-\u0669]/g,c=>c.charCodeAt(0)-1632).replace(/[\u06f0-\u06f9]/g,c=>c.charCodeAt(0)-1776);
+  if(!/^[+\d\s().\-]+$/.test(raw)||!/[0-9]/.test(raw))return;
+  let value=raw.replace(/[\s().\-]/g,'');
+  if(value.startsWith('00'))value='+'+value.slice(2);
+  if(!/^\+?\d+$/.test(value))return;
+  selectCountry('PK');
+  // Prefer a valid local number; otherwise try a bare international number.
+  if(!value.startsWith('+')){
+    const local=parse(value);
+    if(!local?.isValid()){
+      const international=parse('+'+value);
+      if(international?.isValid())value='+'+value;
+    }
+  }
+  $('phone').value=value;
+  touched=true;
+  normalize();
+}
+prefillFromPath(window.location.pathname);
 </script></body></html>
