@@ -12,26 +12,70 @@ const zones={'Asia/Karachi':'PK','Asia/Kolkata':'IN','Asia/Calcutta':'IN','Asia/
 let country=zones[Intl.DateTimeFormat().resolvedOptions().timeZone]||navigator.language.split('-').pop().toUpperCase();if(!lib.getCountries().includes(country))country='PK';let touched=false,current=null;
 const flag=code=>String.fromCodePoint(...[...code].map(c=>127397+c.charCodeAt(0)));
 function selectCountry(code){country=code;$('flag').textContent=flag(code);$('prefix').textContent='+'+lib.getCountryCallingCode(code);$('country-button').setAttribute('aria-label',names.of(code)+' +'+lib.getCountryCallingCode(code)+'. Change country');$('phone').placeholder=code==='PK'?'3352522522':code==='US'||code==='CA'?'2015550123':code==='GB'?'7700900123':'Phone number';}
-function parse(raw){let value=raw.trim().replace(/[\u0660-\u0669]/g,c=>c.charCodeAt(0)-1632).replace(/[\u06f0-\u06f9]/g,c=>c.charCodeAt(0)-1776);if(!value||/[^\d\s+().\-]/.test(value))return null;value=value.replace(/[\s().\-]/g,'');if(value.startsWith('00'))value='+'+value.slice(2);try{return lib.parsePhoneNumberFromString(value,country)||null}catch{return null}}
+function parse(raw){let value=raw.trim().replace(/[\u0660-\u0669]/g,c=>c.charCodeAt(0)-1632).replace(/[\u06f0-\u06f9]/g,c=>c.charCodeAt(0)-1776);if(!value||/[^\d\s+().\-]/.test(value))return null;value=value.replace(/[\s().\-]/g,'');if(value.startsWith('00'))value='+'+value.slice(2);if(!/^\+?\d+$/.test(value))return null;try{return lib.parsePhoneNumberFromString(value,country)||null}catch{return null}}
 function validate(showError=false){const raw=$('phone').value;current=parse(raw);const valid=!!current?.isValid();$('open').disabled=!valid;const error=!!raw&&!valid&&(showError||touched);$('input-group').classList.toggle('invalid',error);$('phone').setAttribute('aria-invalid',String(error));$('feedback').className='feedback'+(error?' error':valid?' valid':'');$('feedback').textContent=error?'Enter a valid '+names.of(country)+' number, including all digits.':valid?'Ready to chat with '+current.formatInternational():'Paste a number in any format. We’ll tidy it up.';if(valid){$('feedback').append(document.createTextNode(', open on '));const webLink=document.createElement('a');webLink.textContent='WhatsApp Web';webLink.href='https://web.whatsapp.com/send/?phone='+encodeURIComponent(current.number)+'&text&type=phone_number&app_absent=0';webLink.target='_blank';webLink.rel='noopener noreferrer';$('feedback').append(webLink);}return valid}
 function normalize(){const phone=parse($('phone').value);if(phone){const inferred=phone.country||(phone.countryCallingCode===lib.getCountryCallingCode(country)?country:phone.countryCallingCode==='1'?'US':lib.getCountries().find(c=>lib.getCountryCallingCode(c)===phone.countryCallingCode));if(inferred&&inferred!==country)selectCountry(inferred);$('phone').value=phone.nationalNumber;}else if(/^[\d\s+().\-]+$/.test($('phone').value)){$('phone').value=$('phone').value.replace(/[\s().\-]/g,'');}validate(touched)}
-$('phone').addEventListener('input',()=>validate());$('phone').addEventListener('paste',()=>setTimeout(normalize,0));$('phone').addEventListener('blur',()=>{touched=true;normalize()});$('chat-form').addEventListener('submit',e=>{e.preventDefault();touched=true;normalize();if(validate(true))window.open('https://wa.me/'+current.number.slice(1),'_blank','noopener,noreferrer')});
+$('phone').addEventListener('input',()=>validate());$('phone').addEventListener('paste',()=>setTimeout(normalize,0));$('phone').addEventListener('blur',()=>{touched=true;normalize()});$('chat-form').addEventListener('submit',e=>{e.preventDefault();touched=true;normalize();if(validate(true))openWhatsApp(current)});
 function renderCountries(){const q=$('search').value.trim().toLowerCase().replace(/^\+/,'');const matches=countryData.filter(c=>c.name.toLowerCase().includes(q)||c.dial.startsWith(q)||c.code.toLowerCase()===q);$('country-list').replaceChildren();for(const c of matches){const button=document.createElement('button');button.type='button';button.className='option';button.setAttribute('aria-pressed',String(c.code===country));const f=document.createElement('span');f.className='flag';f.textContent=flag(c.code);const name=document.createElement('span');name.textContent=c.name;const dial=document.createElement('span');dial.className='dial';dial.textContent='+'+c.dial;button.append(f,name,dial);button.addEventListener('click',()=>{selectCountry(c.code);$('countries').close();validate(touched);$('phone').focus()});$('country-list').append(button)}if(!matches.length){const empty=document.createElement('p');empty.className='empty';empty.textContent='No countries found.';$('country-list').append(empty)}}
 $('country-button').onclick=()=>{$('search').value='';renderCountries();$('countries').showModal();$('search').focus()};$('close').onclick=()=>$('countries').close();$('countries').addEventListener('click',e=>{if(e.target===$('countries')){const r=$('countries').getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)$('countries').close()}});$('search').addEventListener('input',renderCountries);selectCountry(country);
 
-// URL numbers without an international prefix use Pakistan consistently,
-// regardless of the visitor's timezone or browser language.
+// External app launching is best effort; browsers may require confirmation.
+let cancelPendingLaunch=()=>{};
+function openWhatsApp(phone){
+  cancelPendingLaunch();
+  if(!phone?.isValid())return;
+  const digits=phone.number.slice(1);
+  const webUrl='https://web.whatsapp.com/send?phone='+encodeURIComponent(digits);
+  let timer;
+  function cancel(){
+    clearTimeout(timer);
+    document.removeEventListener('visibilitychange',onVisibility);
+    window.removeEventListener('pagehide',cancel);
+    cancelPendingLaunch=()=>{};
+  }
+  function onVisibility(){if(document.visibilityState==='hidden')cancel();}
+  function fallback(){
+    cancel();
+    if(document.visibilityState!=='hidden')window.location.replace(webUrl);
+  }
+  document.addEventListener('visibilitychange',onVisibility);
+  window.addEventListener('pagehide',cancel);
+  cancelPendingLaunch=cancel;
+  timer=setTimeout(fallback,2500);
+  $('feedback').replaceChildren(document.createTextNode('Opening WhatsApp… If it doesn’t open, continue on '));
+  const link=document.createElement('a');
+  link.href=webUrl;link.textContent='WhatsApp Web';
+  link.addEventListener('click',cancel);
+  $('feedback').append(link);
+  try{window.location.assign('whatsapp://send?phone='+encodeURIComponent(digits));}
+  catch{fallback();}
+}
+// Editing cancels any pending redirect to the previous number.
+$('phone').addEventListener('input',()=>cancelPendingLaunch());
+$('country-button').addEventListener('click',()=>cancelPendingLaunch());
+
+// Local URL numbers consistently default to Pakistan.
 function prefillFromPath(pathname){
-  let raw;
-  try{raw=decodeURIComponent(pathname.replace(/^\/+|\/+$/g,''));}catch{return;}
+  let raw=pathname.replace(/^\/+|\/+$/g,'');
   if(!raw||raw==='index.html')return;
+  try{raw=decodeURIComponent(raw);}catch{
+    $('phone').value=raw;touched=true;validate(true);return;
+  }
   raw=raw.trim().replace(/[\u0660-\u0669]/g,c=>c.charCodeAt(0)-1632).replace(/[\u06f0-\u06f9]/g,c=>c.charCodeAt(0)-1776);
-  if(!/^[+\d\s().\-]+$/.test(raw)||!/[0-9]/.test(raw))return;
+  selectCountry('PK');
+  touched=true;
+  $('phone').value=raw;
+  if(!raw||!/^[+\d\s().\-]+$/.test(raw)){
+    validate(true);
+    $('phone').setAttribute('aria-invalid','true');
+    $('input-group').classList.toggle('invalid',true);
+    $('feedback').className='feedback error';
+    $('feedback').textContent='Enter a valid phone number, including all digits.';
+    return;
+  }
   let value=raw.replace(/[\s().\-]/g,'');
   if(value.startsWith('00'))value='+'+value.slice(2);
-  if(!/^\+?\d+$/.test(value))return;
-  selectCountry('PK');
-  // Prefer a valid local number; otherwise try a bare international number.
+  if(!/^\+?\d+$/.test(value)){validate(true);return;}
   if(!value.startsWith('+')){
     const local=parse(value);
     if(!local?.isValid()){
@@ -40,8 +84,8 @@ function prefillFromPath(pathname){
     }
   }
   $('phone').value=value;
-  touched=true;
   normalize();
+  if(validate(true))openWhatsApp(current);
 }
 prefillFromPath(window.location.pathname);
 </script></body></html>
